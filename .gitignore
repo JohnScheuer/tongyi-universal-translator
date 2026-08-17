@@ -1,0 +1,28 @@
+# Rust build artifacts
+target/
+
+# Config com API keys (não versionar)
+config.toml
+
+# Logs
+translations.log
+*.log
+
+# Models (binários grandes)
+models/*.bin
+models/*.npz
+models/*.pt
+models/*.ot
+
+# Windows artifacts
+*.exe
+*.pdb
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# WSL artifacts
+.DS_Store

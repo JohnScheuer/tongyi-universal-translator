@@ -1,0 +1,9 @@
+// TōngYì (通译) resources
+// Os arquivos .ico serão adicionados depois (STEP 12).
+// build.rs só compila resources quando o host for Windows.
+
+#define IDI_TONGYI_ACTIVE    101
+#define IDI_TONGYI_INACTIVE  102
+
+IDI_TONGYI_ACTIVE   ICON "assets/tongyi_active.ico"
+IDI_TONGYI_INACTIVE ICON "assets/tongyi_inactive.ico"

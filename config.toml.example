@@ -1,0 +1,25 @@
+[general]
+source_language = "pt"          # pt | en | es
+target_language = "zh-cn"
+active_engine = "windows_lp"   # windows_lp | marian | deepl | google
+hotkey_modifier = "shift"       # shift | ctrl+shift | alt
+hotkey_key = "enter"
+
+[engines.deepl]
+api_key = ""
+# Get your key at: https://www.deepl.com/pro-api
+
+[engines.google]
+api_key = ""
+# Get your key at: https://console.cloud.google.com
+
+[engines.marian]
+model_path = "./models"
+# Models downloaded via: scripts/download_models.ps1
+
+[ui]
+show_notifications = true
+notification_duration_ms = 2000
+show_original_in_notification = true
+log_translations = true
+log_file = "translations.log"
