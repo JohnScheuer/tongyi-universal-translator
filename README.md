@@ -5,59 +5,81 @@
 [![Release](https://img.shields.io/badge/release-v0.1-informational)](#)
 [![License](https://img.shields.io/badge/license-See%20LICENSE-green)](./LICENSE)
 
-Windows tray utility that translates text in the currently focused input field via a global hotkey and replaces it in-place (target: Simplified Chinese, `zh-cn`).
+Universal Windows tray translator: press a global hotkey to translate the currently focused input field and replace it in-place.
+
+Target language: Simplified Chinese (zh-cn)
 
 Author: João Felipe De Souza  
 GitHub: https://github.com/JohnScheuer
 
 ## Quick links
-
 - Design notes: ./design.md
 - Current state summary: ./summary.txt
 - License: ./LICENSE
 
-## What it does (V0.1)
+## Features (V0.1)
+- Runs as a lightweight Windows tray application
+- Global hotkey translation (default: Shift+Enter)
+- In-place replacement in the currently focused input field
+- Full clipboard backup/restore using OLE IDataObject
+- Active/Inactive toggle from tray
+- Engine and source-language selection from tray menu
 
-- Runs in the Windows system tray (hidden window + Win32 message loop).
-- Global hotkey (default): Shift+Enter
-  - Select all (Ctrl+A)
-  - Copy (Ctrl+C)
-  - Translate (engine)
-  - Paste back (Ctrl+V)
-  - Restores the user clipboard (full clipboard backup/restore via OLE IDataObject)
-- Tray UX:
-  - Left-click: toggle Active/Inactive
-  - Right-click: menu to select engine and source language, and Exit
+### Runtime behavior
+- Starts silently and stays in the system tray
+- Uses a global hotkey to trigger translation
+- Does not require Administrator privileges (do not run as Admin)
+
+### Tray behavior
+- Left-click toggles Active/Inactive
+- Right-click opens a menu to select:
+  - Engine
+  - Source language
+  - Exit
+
+### Translation flow
+1. Select all (Ctrl+A)
+2. Copy (Ctrl+C)
+3. Translate with selected engine
+4. Paste translated text back (Ctrl+V)
+5. Restore original clipboard contents
 
 ## Translation engines (V0.1)
 
-Implemented / working:
-- MarianMT offline (Python worker), with pivot strategy:
+### Available
+- MarianMT offline (Python worker)  
+  Local translation after one-time model download.  
+  Depends on a local Python runtime and a persistent worker script.  
+  Uses a pivot pipeline:
   - PT/ES -> EN via opus-mt-ROMANCE-en
   - EN -> ZH via opus-mt-en-zh
-- Phrasebook-first for short greetings (deterministic output)
-  - Example: "bom dia" -> "早上好"
+  - Phrasebook-first for short greetings (deterministic results)
 
-Implemented but requires API key:
-- DeepL API (config.engines.deepl.api_key)
-- Google Translate API (config.engines.google.api_key)
+### Available with API key
+- DeepL API
+- Google Translate API
 
-Stubbed (clean error for now):
-- Windows Language Pack engine (not implemented in V0.1)
+### Not yet implemented
+- Windows Language Pack engine
 
 ## Install (V0.1)
 
-1) Download the release zip (or build from source).
+### Option A — Run prebuilt release (recommended)
+1) Download the latest release zip
 2) Extract to a folder, for example:
    C:\Apps\tongyi-translator\
-3) Run tongyi-translator.exe (non-admin).
+3) Run tongyi-translator.exe (do not run as Administrator)
 
-Important:
-- Do not run as Administrator.
-- First offline translation can take several seconds (model load). After the first run it becomes faster.
+### Option B — Build from source (Windows)
+Requirements:
+- Rust toolchain (stable)
+- Windows MSVC toolchain
 
-## Offline Marian setup (recommended)
+Commands:
+- cargo run
+- cargo build --release
 
+### Option C — Enable MarianMT offline
 Prerequisites:
 - Python 3.10+ installed (python in PATH)
 - Python packages:
@@ -74,17 +96,9 @@ Download models (online once; after that it works offline):
 - cd C:\Apps\tongyi-translator\
 - python .\scripts\marian_download_models.py --model-dir .\models --force
 
-This will create:
-- models\opus-mt-romance-en\
-- models\opus-mt-en-zh\
-
 Configure config.toml:
-- [general]
-  - active_engine = "marian"
-  - source_language = "pt" (or "en"/"es")
-  - target_language = "zh-cn"
-- [engines.marian]
-  - model_path = "./models"
+- Set engine to marian
+- Set model_path to ./models
 
 Restart the app after config changes.
 
@@ -92,62 +106,60 @@ Restart the app after config changes.
 
 File: config.toml (created automatically on first run)
 
-Common fields:
-- [general]
-  - active = true/false
-  - source_language = "pt" | "en" | "es"
-  - target_language = "zh-cn"
-  - active_engine = "windows_lp" | "marian" | "deepl" | "google"
-  - hotkey_modifier = "shift" | "ctrl+shift" | "alt"
-  - hotkey_key = "enter"
-- [engines.deepl]
-  - api_key = ""
-- [engines.google]
-  - api_key = ""
-- [engines.marian]
-  - model_path = "./models"
-- [ui]
-  - show_notifications = true
+Example:
+
+    [general]
+    active = true
+    active_engine = "marian"
+    source_language = "pt"
+    # valid values: "pt", "en", "es"
+    target_language = "zh-cn"
+    hotkey_modifier = "shift"
+    # valid values: "shift", "ctrl+shift", "alt"
+    hotkey_key = "enter"
+
+    [engines.deepl]
+    api_key = ""
+
+    [engines.google]
+    api_key = ""
+
+    [engines.marian]
+    model_path = "./models"
+
+    [ui]
+    show_notifications = true
 
 ## Usage
-
-1) Open any text field (Notepad, browser input box, Discord, etc.)
+1) Focus any input field (Notepad, browser input box, Discord, etc.)
 2) Type text
 3) Press Shift+Enter
-4) The selected text is replaced by the translated text.
+4) The selected text is replaced by the translated text
 
-Notes:
-- The app uses clipboard + Ctrl+A/C/V simulation, so some apps may behave differently.
-- For safety, if focus changes during a long translation, paste is aborted to avoid replacing content in the wrong window.
+## Current limitations
+- Windows only
+- Translation is driven by simulated Ctrl+A/C/V, so behavior depends on the target application
+- Some applications may block or modify clipboard interactions
+- First Marian translation can be slow due to model load
+- Windows Language Pack engine is not implemented in V0.1
 
 ## Troubleshooting
-
 - Nothing happens on hotkey:
   - Ensure app is Active (tray tooltip/menu)
-  - Another app may be using the same hotkey; change hotkey_modifier in config.toml and restart
-- Marian errors:
-  - Confirm scripts\marian_translate.py exists
-  - Confirm models folder contains opus-mt-romance-en and opus-mt-en-zh
-  - Confirm python dependencies installed:
+  - Another app may be using the same hotkey; change it in config.toml and restart
+- Marian offline:
+  - Confirm scripts/marian_translate.py exists in the app folder
+  - Confirm models folder contains:
+    - models/opus-mt-romance-en/
+    - models/opus-mt-en-zh/
+  - Confirm python deps:
     - python -c "import torch, transformers, sentencepiece, huggingface_hub; print('OK')"
 - DeepL/Google:
-  - Ensure API key is set in config.toml and engine is selected
+  - Ensure API key is set in config.toml and engine is selected in tray
 
 ## Privacy
-
-- Offline Marian: translations happen locally on your machine after models are downloaded.
+- Marian offline: translations are performed locally after model download.
 - API engines: text is sent to the selected provider (DeepL/Google) over the network.
 
-## Development
-
-Build (Windows):
-- cargo run
-- cargo build --release
-
-See:
-- ./design.md
-- ./summary.txt
-
 ## License
-
 See ./LICENSE
