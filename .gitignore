@@ -1,28 +1,63 @@
-# Rust build artifacts
-target/
+# ============================================================
+# Rust
+# ============================================================
+/target/
+**/*.rs.bk
 
-# Config com API keys (não versionar)
+# ============================================================
+# Distribution / local builds
+# ============================================================
+/dist/
+/release/
+/out/
+
+# ============================================================
+# App runtime files (do NOT commit)
+# ============================================================
 config.toml
-
-# Logs
+config.local.toml
 translations.log
 *.log
 
-# Models (binários grandes)
-models/*.bin
-models/*.npz
-models/*.pt
-models/*.ot
+# Models are large and machine-specific (downloaded locally)
+models/
+models/**
 
-# Windows artifacts
-*.exe
-*.pdb
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+.python-version
 
-# Editor
+# ============================================================
+# VS Code / IDE
+# ============================================================
 .vscode/
-.idea/
-*.swp
-*.swo
+*.code-workspace
 
-# WSL artifacts
+# ============================================================
+# OS / Windows artifacts
+# ============================================================
 .DS_Store
+Thumbs.db
+
+*.pdb
+*.obj
+*.iobj
+*.ipdb
+*.exe
+*.dll
+*.lib
+*.exp
+
+# ============================================================
+# Misc
+# ============================================================
+*~

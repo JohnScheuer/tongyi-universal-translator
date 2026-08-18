@@ -100,17 +100,13 @@ impl Default for EngineConfigs {
 
 impl Default for DeepLConfig {
     fn default() -> Self {
-        Self {
-            api_key: "".to_string(),
-        }
+        Self { api_key: "".to_string() }
     }
 }
 
 impl Default for GoogleConfig {
     fn default() -> Self {
-        Self {
-            api_key: "".to_string(),
-        }
+        Self { api_key: "".to_string() }
     }
 }
 
@@ -140,8 +136,8 @@ impl AppConfig {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-        let cfg: AppConfig = toml::from_str(&raw)
-            .with_context(|| format!("Failed to parse TOML: {}", path.display()))?;
+        let cfg: AppConfig =
+            toml::from_str(&raw).with_context(|| format!("Failed to parse TOML: {}", path.display()))?;
 
         Ok(cfg)
     }

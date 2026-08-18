@@ -1,33 +1,32 @@
 use thiserror::Error;
 
+pub mod router;
 pub mod deepl;
 pub mod google;
 pub mod marian;
-pub mod router;
 pub mod windows_lp;
 
-pub trait TranslationEngine: Send + Sync {
-    fn name(&self) -> &str;
+pub trait TranslationEngine {
+    fn name(&self) -> &'static str;
 
-    fn translate(
-        &self,
-        text: &str,
-        source: &str,
-        target: &str,
-    ) -> Result<String, TranslationError>;
+    fn is_available(&self) -> bool {
+        true
+    }
 
-    fn is_available(&self) -> bool;
+    fn requires_api_key(&self) -> bool {
+        false
+    }
 
-    fn requires_api_key(&self) -> bool;
+    fn translate(&self, text: &str, source: &str, target: &str) -> Result<String, TranslationError>;
 }
 
 #[derive(Debug, Error)]
 pub enum TranslationError {
-    #[error("network error: {0}")]
-    NetworkError(String),
-
     #[error("api key missing")]
     ApiKeyMissing,
+
+    #[error("network error: {0}")]
+    NetworkError(String),
 
     #[error("language not supported: {0}")]
     LanguageNotSupported(String),

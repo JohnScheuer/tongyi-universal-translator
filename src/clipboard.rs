@@ -1,184 +1,171 @@
-#[cfg(windows)]
-mod imp {
-    use anyhow::{anyhow, Context, Result};
-    use clipboard_win::{formats, get_clipboard, set_clipboard};
-    use std::ptr;
-    use std::thread::sleep;
-    use std::time::Duration;
+// src/clipboard.rs
+use anyhow::{anyhow, Context, Result};
+use std::{
+    mem::size_of,
+    ptr,
+    time::{Duration, Instant},
+};
+use windows::Win32::{
+    Foundation::{GetLastError, HANDLE, HWND, HGLOBAL},
+    System::{
+        Com::IDataObject,
+        DataExchange::{CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData},
+        Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+        Ole::{OleGetClipboard, OleInitialize, OleSetClipboard},
+    },
+};
 
-    use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
-    use windows::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, OpenClipboard,
-        SetClipboardData,
-    };
-    use windows::Win32::System::Memory::{
-        GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
-    };
+// CF_UNICODETEXT = 13 (Win32)
+const CF_UNICODETEXT: u32 = 13;
 
-    const OPEN_RETRIES: usize = 80;
-    const OPEN_RETRY_DELAY_MS: u64 = 25;
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalFree(hmem: HGLOBAL) -> HGLOBAL;
+}
 
-    #[derive(Debug)]
-    struct ClipboardGuard;
+pub struct ClipboardBackup {
+    data_object: IDataObject,
+}
 
-    impl ClipboardGuard {
-        fn open_with_retry() -> Result<Self> {
-            let mut last_err: Option<anyhow::Error> = None;
+fn win_last_error(msg: &str) -> anyhow::Error {
+    let e = unsafe { GetLastError() };
+    anyhow!("{msg} (GetLastError={})", e.0)
+}
 
-            for _ in 0..OPEN_RETRIES {
-                let res = unsafe { OpenClipboard(HWND(ptr::null_mut())) };
-                match res {
-                    Ok(()) => return Ok(Self),
-                    Err(e) => {
-                        last_err = Some(anyhow!(e).context("OpenClipboard failed"));
-                        sleep(Duration::from_millis(OPEN_RETRY_DELAY_MS));
-                    }
-                }
+fn ensure_ole_initialized() -> Result<()> {
+    unsafe { OleInitialize(None).ok().context("OleInitialize failed")? };
+    Ok(())
+}
+
+struct ClipboardGuard;
+
+impl ClipboardGuard {
+    fn open_retry(timeout: Duration) -> Result<Self> {
+        let start = Instant::now();
+        loop {
+            let r = unsafe { OpenClipboard(HWND(ptr::null_mut())) };
+            if r.is_ok() {
+                return Ok(Self);
             }
-
-            Err(last_err.unwrap_or_else(|| anyhow!("OpenClipboard failed (unknown error)")))
+            if start.elapsed() >= timeout {
+                return Err(win_last_error("OpenClipboard failed (timeout)"));
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
+}
 
-    impl Drop for ClipboardGuard {
-        fn drop(&mut self) {
-            unsafe {
-                let _ = CloseClipboard();
-            }
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    struct FormatBlob {
-        format: u32,
-        data: Vec<u8>,
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct ClipboardBackup {
-        blobs: Vec<FormatBlob>,
-    }
-
-    pub fn read_text() -> Result<String> {
-        // clipboard-win retorna ErrorCode (nao implementa StdError), então sem .context()
-        get_clipboard(formats::Unicode)
-            .map_err(|e| anyhow!("Failed to read Unicode text from clipboard: {e:?}"))
-    }
-
-    pub fn write_text(text: &str) -> Result<()> {
-        set_clipboard(formats::Unicode, text.to_string())
-            .map_err(|e| anyhow!("Failed to write Unicode text to clipboard: {e:?}"))
-    }
-
-    pub fn backup() -> Result<ClipboardBackup> {
-        let _guard = ClipboardGuard::open_with_retry()?;
-
-        let mut blobs: Vec<FormatBlob> = Vec::new();
-
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
         unsafe {
-            let mut fmt = EnumClipboardFormats(0);
-            while fmt != 0 {
-                // GetClipboardData pode falhar para alguns formatos; nesse caso, só ignoramos.
-                let handle: HANDLE = match GetClipboardData(fmt) {
-                    Ok(h) => h,
-                    Err(_) => {
-                        fmt = EnumClipboardFormats(fmt);
-                        continue;
-                    }
-                };
+            let _ = CloseClipboard();
+        }
+    }
+}
 
-                if handle.0.is_null() {
-                    fmt = EnumClipboardFormats(fmt);
-                    continue;
+/// Backup do clipboard inteiro via OLE IDataObject.
+pub fn backup() -> Result<ClipboardBackup> {
+    ensure_ole_initialized()?;
+
+    let start = Instant::now();
+    loop {
+        match unsafe { OleGetClipboard() } {
+            Ok(data_object) => return Ok(ClipboardBackup { data_object }),
+            Err(e) => {
+                if start.elapsed() >= Duration::from_millis(250) {
+                    return Err(anyhow!("OleGetClipboard failed: {e:?}"));
                 }
-
-                // Tentamos tratar como HGLOBAL. Se não for HGLOBAL (ex: CF_BITMAP),
-                // GlobalSize/GlobalLock normalmente retorna 0/null e nós pulamos.
-                let hglobal = HGLOBAL(handle.0);
-
-                let size = GlobalSize(hglobal);
-                if size == 0 {
-                    fmt = EnumClipboardFormats(fmt);
-                    continue;
-                }
-
-                let p = GlobalLock(hglobal) as *const u8;
-                if p.is_null() {
-                    fmt = EnumClipboardFormats(fmt);
-                    continue;
-                }
-
-                let slice = std::slice::from_raw_parts(p, size);
-                blobs.push(FormatBlob {
-                    format: fmt,
-                    data: slice.to_vec(),
-                });
-
-                let _ = GlobalUnlock(hglobal);
-
-                fmt = EnumClipboardFormats(fmt);
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
+    }
+}
 
-        Ok(ClipboardBackup { blobs })
+pub fn restore(backup: ClipboardBackup) -> Result<()> {
+    ensure_ole_initialized()?;
+    unsafe { OleSetClipboard(&backup.data_object).ok().context("OleSetClipboard failed")? };
+    Ok(())
+}
+
+pub fn clear() -> Result<()> {
+    let _g = ClipboardGuard::open_retry(Duration::from_millis(250))?;
+    unsafe { EmptyClipboard().ok().context("EmptyClipboard failed")? };
+    Ok(())
+}
+
+pub fn read_text() -> Result<String> {
+    let _g = ClipboardGuard::open_retry(Duration::from_millis(250))?;
+
+    let handle: HANDLE = match unsafe { GetClipboardData(CF_UNICODETEXT) } {
+        Ok(h) => h,
+        Err(_) => return Ok(String::new()),
+    };
+
+    if handle.0.is_null() {
+        return Ok(String::new());
     }
 
-    pub fn restore(backup: ClipboardBackup) -> Result<()> {
-        let _guard = ClipboardGuard::open_with_retry()?;
+    let hglobal = HGLOBAL(handle.0);
+    let p = unsafe { GlobalLock(hglobal) } as *const u16;
+    if p.is_null() {
+        return Err(win_last_error("GlobalLock failed"));
+    }
 
-        unsafe {
-            EmptyClipboard().context("EmptyClipboard failed")?;
+    let mut len = 0usize;
+    unsafe {
+        while *p.add(len) != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(p, len);
+        let s = String::from_utf16_lossy(slice);
+        let _ = GlobalUnlock(hglobal);
+        Ok(s)
+    }
+}
 
-            // Recria apenas os formatos que conseguimos clonar como HGLOBAL.
-            // Isso evita crashes/heap corruption com formatos baseados em GDI handles.
-            for blob in backup.blobs {
-                let len = blob.data.len();
+pub fn write_text(text: &str) -> Result<()> {
+    let _g = ClipboardGuard::open_retry(Duration::from_millis(250))?;
+    unsafe { EmptyClipboard().ok().context("EmptyClipboard failed")? };
 
-                let hmem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, len)
-                    .context("GlobalAlloc failed while restoring clipboard")?;
+    unsafe {
+        let mut wide: Vec<u16> = text.encode_utf16().collect();
+        wide.push(0);
 
-                let dst = GlobalLock(hmem) as *mut u8;
-                if dst.is_null() {
-                    return Err(anyhow!("GlobalLock failed while restoring clipboard"));
-                }
+        let bytes = wide.len() * size_of::<u16>();
+        let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes).context("GlobalAlloc failed")?;
+        if hmem.0.is_null() {
+            return Err(win_last_error("GlobalAlloc returned NULL"));
+        }
 
-                ptr::copy_nonoverlapping(blob.data.as_ptr(), dst, len);
+        let p = GlobalLock(hmem) as *mut u16;
+        if p.is_null() {
+            let _ = GlobalFree(hmem);
+            return Err(win_last_error("GlobalLock failed"));
+        }
 
-                let _ = GlobalUnlock(hmem);
+        ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
+        let _ = GlobalUnlock(hmem);
 
-                // Em sucesso, o clipboard assume ownership do HGLOBAL.
-                SetClipboardData(blob.format, HANDLE(hmem.0)).with_context(|| {
-                    format!("SetClipboardData failed for format {}", blob.format)
-                })?;
-            }
+        // Se OK, o sistema assume ownership do HGLOBAL.
+        if SetClipboardData(CF_UNICODETEXT, HANDLE(hmem.0)).is_err() {
+            let _ = GlobalFree(hmem);
+            return Err(win_last_error("SetClipboardData(CF_UNICODETEXT) failed"));
         }
 
         Ok(())
     }
 }
 
-#[cfg(not(windows))]
-mod imp {
-    use anyhow::{anyhow, Result};
-
-    #[derive(Debug, Clone)]
-    pub struct ClipboardBackup;
-
-    pub fn read_text() -> Result<String> {
-        Err(anyhow!("Clipboard not supported on non-Windows targets."))
-    }
-
-    pub fn write_text(_text: &str) -> Result<()> {
-        Err(anyhow!("Clipboard not supported on non-Windows targets."))
-    }
-
-    pub fn backup() -> Result<ClipboardBackup> {
-        Err(anyhow!("Clipboard not supported on non-Windows targets."))
-    }
-
-    pub fn restore(_backup: ClipboardBackup) -> Result<()> {
-        Err(anyhow!("Clipboard not supported on non-Windows targets."))
+pub fn read_text_retry(max_wait: Duration) -> Result<String> {
+    let start = Instant::now();
+    loop {
+        let s = read_text()?;
+        if !s.is_empty() {
+            return Ok(s);
+        }
+        if start.elapsed() >= max_wait {
+            return Ok(String::new());
+        }
+        std::thread::sleep(Duration::from_millis(15));
     }
 }
-
-pub use imp::{backup, read_text, restore, write_text, ClipboardBackup};

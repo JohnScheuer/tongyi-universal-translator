@@ -1,91 +1,85 @@
+use std::time::Duration;
+
+use anyhow::Context;
+use serde::Deserialize;
+
 use super::{TranslationEngine, TranslationError};
 
 pub struct GoogleEngine {
     api_key: String,
-    client: reqwest::blocking::Client,
 }
 
 impl GoogleEngine {
     pub fn new(api_key: String) -> Self {
-        Self {
-            api_key,
-            client: reqwest::blocking::Client::new(),
-        }
+        Self { api_key }
     }
 
-    fn map_lang_src(src: &str) -> Result<&'static str, TranslationError> {
-        match src.to_ascii_lowercase().as_str() {
+    fn map_lang(lang: &str) -> Result<&'static str, TranslationError> {
+        match lang {
             "pt" => Ok("pt"),
             "en" => Ok("en"),
             "es" => Ok("es"),
-            other => Err(TranslationError::LanguageNotSupported(format!(
-                "source={other}"
-            ))),
-        }
-    }
-
-    fn map_lang_tgt(tgt: &str) -> Result<&'static str, TranslationError> {
-        match tgt.to_ascii_lowercase().as_str() {
-            "zh" | "zh-cn" => Ok("zh-CN"),
-            other => Err(TranslationError::LanguageNotSupported(format!(
-                "target={other}"
-            ))),
+            "zh-cn" => Ok("zh-CN"),
+            _ => Err(TranslationError::LanguageNotSupported(lang.to_string())),
         }
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct GoogleResp {
+    data: GoogleData,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleData {
+    translations: Vec<GoogleTranslation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleTranslation {
+    #[serde(rename = "translatedText")]
+    translated_text: String,
+}
+
 impl TranslationEngine for GoogleEngine {
-    fn name(&self) -> &str {
-        "Google Translate"
+    fn name(&self) -> &'static str {
+        "google"
     }
 
-    fn translate(
-        &self,
-        text: &str,
-        source: &str,
-        target: &str,
-    ) -> Result<String, TranslationError> {
-        if self.api_key.trim().is_empty() {
+    fn requires_api_key(&self) -> bool {
+        true
+    }
+
+    fn translate(&self, text: &str, source: &str, target: &str) -> Result<String, TranslationError> {
+        let api_key = self.api_key.trim();
+        if api_key.is_empty() {
             return Err(TranslationError::ApiKeyMissing);
         }
 
-        let src = Self::map_lang_src(source)?;
-        let tgt = Self::map_lang_tgt(target)?;
+        let source = Self::map_lang(source)?;
+        let target = Self::map_lang(target)?;
 
-        #[derive(serde::Deserialize)]
-        struct GoogleResp {
-            data: GoogleData,
-        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(12))
+            .build()
+            .map_err(|e| TranslationError::NetworkError(e.to_string()))?;
 
-        #[derive(serde::Deserialize)]
-        struct GoogleData {
-            translations: Vec<GoogleTranslation>,
-        }
+        let url = "https://translation.googleapis.com/language/translate/v2";
 
-        #[derive(serde::Deserialize)]
-        struct GoogleTranslation {
-            #[serde(rename = "translatedText")]
-            translated_text: String,
-        }
-
-        let resp = self
-            .client
-            .post("https://translation.googleapis.com/language/translate/v2")
-            .query(&[
+        let resp = client
+            .post(url)
+            .query(&[("key", api_key)])
+            .form(&[
                 ("q", text),
-                ("source", src),
-                ("target", tgt),
+                ("source", source),
+                ("target", target),
                 ("format", "text"),
-                ("key", self.api_key.trim()),
             ])
-            .timeout(std::time::Duration::from_secs(5))
             .send()
             .map_err(|e| TranslationError::NetworkError(e.to_string()))?;
 
         let status = resp.status();
-        let body = resp
-            .text()
-            .map_err(|e| TranslationError::NetworkError(e.to_string()))?;
+        let body = resp.text().unwrap_or_default();
 
         if !status.is_success() {
             return Err(TranslationError::TranslationFailed(format!(
@@ -96,22 +90,22 @@ impl TranslationEngine for GoogleEngine {
         }
 
         let parsed: GoogleResp = serde_json::from_str(&body)
+            .with_context(|| format!("Google JSON parse failed: {body}"))
             .map_err(|e| TranslationError::TranslationFailed(e.to_string()))?;
 
-        parsed
+        let out = parsed
             .data
             .translations
-            .into_iter()
-            .next()
-            .map(|t| t.translated_text)
-            .ok_or_else(|| TranslationError::TranslationFailed("Google: empty response".to_string()))
-    }
+            .get(0)
+            .map(|t| t.translated_text.trim().to_string())
+            .unwrap_or_default();
 
-    fn is_available(&self) -> bool {
-        !self.api_key.trim().is_empty()
-    }
+        if out.is_empty() {
+            return Err(TranslationError::TranslationFailed(
+                "Google returned empty translation".to_string(),
+            ));
+        }
 
-    fn requires_api_key(&self) -> bool {
-        true
+        Ok(out)
     }
 }

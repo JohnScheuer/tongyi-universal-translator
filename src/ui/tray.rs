@@ -22,17 +22,19 @@ use crate::config::AppConfig;
 pub const WM_TRAYICON: u32 = WM_USER + 1;
 pub const TRAY_UID: u32 = 1;
 
-// Menu IDs
-const ID_ENGINE_WINDOWS_LP: u16 = 1001;
-const ID_ENGINE_MARIAN: u16 = 1002;
-const ID_ENGINE_DEEPL: u16 = 1003;
-const ID_ENGINE_GOOGLE: u16 = 1004;
+// =========================================================
+// Menu IDs (exportados para o main.rs não duplicar números)
+// =========================================================
+pub const ID_ENGINE_WINDOWS_LP: u16 = 1001;
+pub const ID_ENGINE_MARIAN: u16 = 1002;
+pub const ID_ENGINE_DEEPL: u16 = 1003;
+pub const ID_ENGINE_GOOGLE: u16 = 1004;
 
-const ID_SRC_PT: u16 = 2001;
-const ID_SRC_EN: u16 = 2002;
-const ID_SRC_ES: u16 = 2003;
+pub const ID_SRC_PT: u16 = 2001;
+pub const ID_SRC_EN: u16 = 2002;
+pub const ID_SRC_ES: u16 = 2003;
 
-const ID_EXIT: u16 = 9999;
+pub const ID_EXIT: u16 = 9999;
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -88,6 +90,7 @@ impl Tray {
                 return Err(anyhow!("Shell_NotifyIconW NIM_ADD failed"));
             }
 
+            // VERSION_4 fix (confirmado)
             nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
             let _ = Shell_NotifyIconW(NIM_SETVERSION, &mut nid);
 

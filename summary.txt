@@ -1,0 +1,101 @@
+TongYi Translator (通译) — Project Summary (Current State)
+
+Overview
+- Windows-only Rust app that translates text typed in the active field using a global hotkey and replaces the original text with the translation (target: zh-cn).
+- Runs as a system tray application with a hidden window and a Win32 message loop.
+- Primary user interaction:
+  - Hotkey: Shift+Enter (configurable in config.toml for modifier/key).
+  - Tray icon:
+    - Left-click toggles Active/Inactive.
+    - Right-click opens context menu (Engine, Source language, Exit).
+
+Current Working Milestone (Core Product)
+- End-to-end hotkey pipeline works:
+  1) Detect global hotkey
+  2) Select all in active field (Ctrl+A)
+  3) Copy selection (Ctrl+C)
+  4) Read clipboard text (Unicode)
+  5) Translate text (engine)
+  6) Write translation to clipboard
+  7) Paste back (Ctrl+V) to replace field content
+  8) Restore original clipboard (full clipboard backup via OLE IDataObject)
+
+Tray/UX Status
+- Tray icon works reliably using NOTIFYICON_VERSION_4.
+- Correct parsing confirmed with VERSION_4:
+  - notify_code = LOWORD(LPARAM)
+  - icon_id    = HIWORD(LPARAM)
+  - anchor coords come from WPARAM (not used for event type)
+- Context menu works, includes engines and source language choices.
+- Active/Inactive toggle is functional and persisted to config.toml.
+
+Translation Engines (V1 Implementation Status)
+- Engine router abstraction exists (TranslationEngine trait + router).
+- Implemented and working:
+  - MarianMT / Helsinki-NLP offline via Python subprocess worker (persistent) using pivot:
+    - PT/ES -> EN via opus-mt-ROMANCE-en
+    - EN -> ZH via opus-mt-en-zh
+  - Phrasebook-first for short/common greetings to ensure deterministic results:
+    - Example: "bom dia" -> "早上好"
+- Implemented (API-based) but requires user keys:
+  - DeepL (requires config.engines.deepl.api_key)
+  - Google Translate (requires config.engines.google.api_key)
+- Stubbed / not yet available:
+  - Windows Language Pack engine (clean EngineUnavailable message)
+- Marian models download:
+  - scripts/marian_download_models.py downloads required models into ./models
+  - scripts/marian_translate.py performs translation on demand
+
+Robustness Improvements Implemented
+- Clipboard:
+  - Unicode CF_UNICODETEXT support
+  - Full clipboard backup/restore via OLE (OleGetClipboard/OleSetClipboard)
+- Hotkey:
+  - Implemented via user32 FFI for reliability (RegisterHotKey/UnregisterHotKey)
+- Input simulation:
+  - SendInput for Ctrl+A/C/V
+  - release_shift() to prevent Shift+Enter interfering with subsequent combos
+- Long translation latency safety:
+  - Captures foreground window at hotkey time; aborts paste if focus changes during translation
+  - Re-focuses and re-selects before paste (helps after long Marian load times)
+  - Performs paste twice best-effort to increase success rate
+
+Key Files
+- src/main.rs
+  - hidden window, message loop, WM_TRAYICON and WM_HOTKEY
+  - integrates Tray module and calls translator::translate_active_field
+- src/ui/tray.rs
+  - tray icon + menu + NOTIFYICON_VERSION_4 parsing
+- src/config.rs
+  - TOML config load/save defaults:
+    - general.active, source_language, target_language, active_engine, hotkey_modifier, hotkey_key
+    - engines.deepl.api_key, engines.google.api_key, engines.marian.model_path
+    - ui.show_notifications
+- src/clipboard.rs
+  - clipboard read/write + backup/restore
+- src/input.rs
+  - SendInput-based key simulation
+- src/hotkey.rs
+  - user32 RegisterHotKey/UnregisterHotKey via FFI
+- src/translator.rs
+  - orchestrator (clipboard + input + engine router) and phrasebook-first + focus-safe paste
+- src/engine/*
+  - engine trait + router + DeepL + Google + Marian + Windows LP stub
+- scripts/marian_translate.py
+  - persistent worker stdin/stdout JSON protocol (ASCII-safe output to avoid Windows charmap errors)
+- scripts/marian_download_models.py
+  - snapshot_download-based downloader (minimal required files)
+
+Operational Notes / Lessons Learned
+- Do not run as Administrator (input simulation and clipboard operations can break/behave differently).
+- WSL -> Windows sync can fail; use a push script to copy critical files into C:\dev\tongyi-translator\.
+- Build should be run on Windows (project is Win32-specific).
+- First Marian translation can be slow (model load); after first run it is faster.
+- Offline Marian pivot quality can be imperfect for very short greetings; phrasebook-first improves UX.
+
+Next Recommended Steps
+- Commit a known-good baseline for: tray + hotkey pipeline + Marian offline worker + focus-safe paste.
+- Move translation execution off the main message loop thread (spawn thread) to keep tray UI responsive during long translations.
+- Improve Marian is_available() checks (script + model files presence).
+- Packaging:
+  - Release build, include scripts/ folder, document Python dependencies and model download steps.

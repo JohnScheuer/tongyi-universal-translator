@@ -1,0 +1,82 @@
+TongYi Translator (通译) — Release Checklist (V0.1)
+
+A) Pre-release sanity
+1) Confirm app runs non-admin.
+2) Confirm tray:
+   - Icon visible
+   - Right-click menu opens reliably
+   - Left-click toggles Active/Inactive
+   - Exit closes process cleanly
+3) Confirm NOTIFYICON_VERSION_4 parsing is unchanged and correct.
+4) Confirm hotkey:
+   - Default Shift+Enter works
+   - Can change modifier in config.toml and hotkey still registers
+5) Confirm clipboard safety:
+   - Unicode works (Chinese paste OK)
+   - Clipboard is restored after each translation
+   - Clipboard restored even on errors (best-effort)
+6) Confirm focus safety:
+   - If focus changes during long Marian translation, paste is aborted (no wrong-target paste)
+
+B) Engine tests
+1) Marian offline
+   - scripts/marian_translate.py present in release folder
+   - scripts/marian_download_models.py present in release folder
+   - Models download works:
+     - python scripts/marian_download_models.py --model-dir ./models --force
+   - In Notepad:
+     - "bom dia" -> "早上好" (phrasebook-first)
+     - A non-phrasebook sentence translates to Chinese
+2) DeepL (optional)
+   - Without API key -> clear notification/error
+   - With API key -> correct translation
+3) Google (optional)
+   - Without API key -> clear notification/error
+   - With API key -> correct translation
+4) Windows Language Pack
+   - Shows clean "unavailable/not implemented" message (no crash)
+
+C) Test matrix (manual)
+1) Notepad: select/replace works
+2) Chrome/Edge input box: select/replace works
+3) Discord (desktop or web): select/replace works
+4) Multiline text
+5) Accents (pt-br), punctuation, emoji
+6) Empty field -> shows error, no clipboard corruption
+
+D) Packaging steps
+1) Update README.md:
+   - Install/run instructions
+   - Marian offline setup
+   - Config keys
+   - Known limitations
+   - "Do not run as Administrator"
+   - Links to design.md, summary.txt, LICENSE
+2) Ensure LICENSE exists and is included in dist zip.
+3) Ensure scripts/build_release.ps1 works on a clean machine.
+4) Run: scripts/build_release.ps1
+   - Verify output zip contains:
+     - tongyi-translator.exe
+     - README.md
+     - design.md
+     - summary.txt
+     - LICENSE
+     - scripts/marian_translate.py
+     - scripts/marian_download_models.py
+     - models/ (empty folder)
+5) Smoke test using only the zipped artifacts:
+   - Extract zip to a new folder
+   - Run exe
+   - Download models into ./models
+   - Translate in Notepad
+
+E) GitHub release
+1) Tag version v0.1.0
+2) Release title: TongYi Translator v0.1.0
+3) Attach zip artifact
+4) Release notes include:
+   - Features
+   - Setup steps (Python + model download)
+   - Supported engines
+   - Limitations
+   - Troubleshooting
